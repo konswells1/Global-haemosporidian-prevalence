@@ -6,6 +6,7 @@ Relevant climatic variables at sample locations were obtained from the WorldClim
 Elevation for all locations were quantified using Shuttle Radar Topography Mission (SRTM) data as accessible through the raster package in R. 
 The proportion of cover with forest and wetland in buffers of 10km radius around sample locations were estimated based on Copernicus landcover data from 2010 (map version 2.07; https://cds.climate.copernicus.eu).
 The normalized difference vegetation index (NDVI) for the year 2010 in buffers of 10km radius around all sampling locations was computed from the Terra Moderate Resolution Imaging Spectroradiometer (MODIS, MOD13Q1 version 6, https://lpdaac.usgs.gov/products/mod13q1v006/) and calculated the mean and 1 standard deviation of the NDVI as measures of the vegetation density and its variation within a year.
+Samples locations were assigned to zoogeogrpahical regions as assigned by Holt et al  2013 (https://science.sciencemag.org/content/339/6115/74).
 
 Bird host-specific species traits from the EltonTraits v1.0 database (https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1890/13-1917.1). In particular, we considered host body mass and the proportion of time species spend foraging in the upper canopy as relevant covariates inour analysis.
 
