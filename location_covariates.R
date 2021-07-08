@@ -1,4 +1,6 @@
 
+
+library(tidyverse)
 library(ggplot2)
 library(raster)
 library(sp)
@@ -6,18 +8,19 @@ library(rgeos)
 library(sf)
 
 
-# WGS84 definition
-WGS84 <- "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"
 
-# Read location data
-PTS <- read.csv("Data.AVM.Global_Location.Covariates.csv", header=T)
+# Avian Malaria records
+DatAVM <- read.csv("AvMal_Infection.csv", header=T)
+
+PTS <-  as_tibble(DatAVM) %>% select (c("Latitude", "Longitude", "Country")) 
+PTS <-  distinct(PTS)
+PTS <-  PTS %>% rename(lat=Latitude, long =Longitude, country =Country)
+
+# ID for each point/location
+PTS$pts_id <- paste0("pt.", 1: dim(PTS)[1])
 
 # Number of points
 NPoints <- dim(PTS)[1]
-# Spatial points
-sp.pts <- sf::st_multipoint(matrix(c(PTS$long,PTS$lat), length(PTS$long), 2))
-# Buffer around sample locations
-buff10.pts <- st_buffer(sp.pts, d=0.1)
 
 
 ######
@@ -26,22 +29,21 @@ buff10.pts <- st_buffer(sp.pts, d=0.1)
 rast_worldclim <- raster::getData("worldclim",var="bio",res=10)
 rast_worldclim <- rast_worldclim[[c("bio1", "bio12", "bio14", "bio15")]] 
 
-sp.pts <- SpatialPoints(data.frame(pts_long, pts_lat), proj4string = rast_worldclim@crs)
-worldclim.values <- extract(rast_worldclim,sp.pts)   
+sp.pts <- SpatialPoints(data.frame(PTS$long, PTS$lat), proj4string = rast_worldclim@crs)
+worldclim.values <- raster::extract(rast_worldclim, sp.pts)   
 
 PTS$bio1 <- worldclim.values[, "bio1"]
 PTS$bio12 <- worldclim.values[, "bio12"]
 PTS$bio14 <- worldclim.values[, "bio14"] 
 PTS$bio15 <- worldclim.values[, "bio15"] 
 
+
 ######
 # Elevation data
 
 PTS$elevation <- rep(NA, NPoints)
-
 elevation_world <- getData('worldclim', var='alt', res=2.5)
-
-PTS$elevation <- extract(elevation_world,sp.pts)
+PTS$elevation <- raster::extract(elevation_world, sp.pts)
 PTS$elevation <- ifelse(PTS$elevation<1,1,PTS$elevation)
 
 ######
@@ -63,9 +65,8 @@ PTS$prop_cropland <- rep(NA, NPoints)
 PTS$prop_water <- rep(NA, NPoints)
 PTS$prop_urban <- rep(NA, NPoints)
 PTS$prop_grassland <- rep(NA, NPoints)
-PTS$prop_snow_ice <- rep(NA, NPoints)
 PTS$prop_treecover <- rep(NA, NPoints)
-
+PTS$prop_shrubland <- rep(NA, NPoints)
 for(p in 1:NPoints){
 	coord_vals <- raster::extract(Copernicus, coord[p,], buffer = 10000)
 	coord_vals <- unlist(coord_vals) 
@@ -73,12 +74,9 @@ for(p in 1:NPoints){
 	PTS$prop_water[p] <- length(which(coord_vals == 210)) / length(coord_vals)
 	PTS$prop_urban[p] <- length(which(coord_vals == 190)) / length(coord_vals)
 	PTS$prop_grassland[p] <- length(which(coord_vals == 130)) / length(coord_vals)
-	PTS$prop_snow_ice[p] <- length(which(coord_vals == 220)) / length(coord_vals)
 	PTS$prop_shrubland[p] <- length(which(coord_vals %in% c(120, 121, 122))) / length(coord_vals)
 	PTS$prop_treecover[p] <- length(which(coord_vals %in% c(40, 50, 60, 61, 62, 71, 72, 80, 81, 82, 90))) / length(coord_vals)
 }
-
-
 
 ###############
 # NDVI data from MODIS
@@ -88,7 +86,7 @@ library(MODISTools)
 PTS$NDVI.mean <- rep(NA< NPoints)
 PTS$NDVI.SD <- rep(NA< NPoints)
 
-# Run multiple loops if donload interrupts
+# Run multiple loops if download interrupts
 for(x in 1:(NPoints*10000)){
 	i <- which(is.na(PTS$NDVI.mean))[1]
 	if(!is.na(i)){
@@ -113,72 +111,77 @@ for(x in 1:(NPoints*10000)){
 	if(i==NPoints){break}else{}
 }
 
+
 ###############
-# Zoogeographic region from Holt et al.
+# Zoogeographic region from Holt et al. 2013
 
 #Map of zoogeographical regions/realms can be downloaded here: https://macroecology.ku.dk/resources/wallace
 
-poly_Realms <- st_read("./zoo.regions_Holt2013/newRealms.shp")
+poly_Realms <- st_read("newRealms.shp")
 
 pts.multi_all <- sf::st_multipoint(as.matrix(data.frame(PTS$long,PTS$lat)))
 pts <- st_cast(st_sfc(pts.multi_all), "POINT")
 st_crs(pts) <- st_crs(poly_Realms)
 
-PTS$Realm <- rep(NA, NPoints)
+# Correct wrong spelling in realm name "Oceania"
+poly_Realms$Realm[which(poly_Realms$Realm=="Oceanina")] <- "Oceania"
+realm_name <- unique(poly_Realms$Realm)
+nrealm <- length(realm_name)
+
+PTS$realm <- rep(NA, NPoints)
 for(r in 1:nrealm){
 	polyrealm <- poly_Realms %>% filter (Realm==realm_name[r])
-	PTS$Realm[which(st_intersects(pts, polyrealm, sparse = FALSE))] <- realm_name[r]
+	PTS$realm[which(st_intersects(pts, polyrealm, sparse = FALSE))] <- realm_name[r]
 }
 
-ggplot(poly_Realms) + geom_sf(aes(fill=Realm)) + geom_point(data=PTS, aes(x=long, y=lat))
+# Complete missing values
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="UK")] <- "Palearctic"
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="Greece")] <- "Palearctic"
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="Spain")] <- "Palearctic"
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="Italy")] <- "Palearctic"
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="Portugal")] <- "Palearctic"
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="Malta")] <- "Palearctic"
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="Japan")] <- "Palearctic"
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="Chile")] <- "Neotropical"
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="Brazil")] <- "Neotropical"
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="New Guinea")] <- "Oriental"
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="Antarctic ")] <- "Palearctic"
+PTS$realm[which(is.na(PTS$realm) & PTS$country=="Falkland Islands")] <- "Neotropical"
+PTS$realm[which(is.na(PTS$realm) & PTS$long<(-61.))] <- "Neotropical"
+PTS$realm[which(is.na(PTS$realm) & PTS$long>110 & PTS$lat>0)] <- "Oriental"
+PTS$realm[which(is.na(PTS$realm) & PTS$long>110 & PTS$lat>(-12))] <- "Oceanina"
+PTS$realm[which(is.na(PTS$realm) & PTS$long>110)] <- "Australian"
+
+ggplot(poly_Realms) + geom_sf(aes(fill=Realm)) + geom_point(data=PTS[which(is.na(PTS$realm)),], aes(x=long, y=lat))
 
 
+write.csv(PTS, file = "AvMal_Locations.csv")
 
 
 #####################
 # Host trait data
 
 # EltonTraits v1.0 (Wilman et al. (2014), https://figshare.com/articles/Data_Paper_Data_Paper/3559887)
-
 temp <- tempfile()
 download.file("https://ndownloader.figshare.com/files/5631081", temp)
 
 Elton.dat <- read.table(temp, header = TRUE,
 fill  = TRUE, quote = "\"", stringsAsFactors = FALSE,sep = "\t")
 unlink(temp)
+Elton.dat <- as.tibble(Elton.dat) 
+Elton.dat <- rename(Elton.dat, Species =Scientific)
+
+# Migration distance data from Dufour et al. 2020, https://onlinelibrary.wiley.com/doi/full/10.1111/jbi.13700
+DatMigr  <- as.tibble(read.csv("Dufor_migration.data_210315.csv", header=T))
+DatMigr$Species <- gsub("_", " ", DatMigr$Sp.Scien.jetz)
+DatMigr  <- DatMigr  %>% select(Species, strategy_3, distance_4, distance_quanti_RES0)
+DatMigr  <- rename(DatMigr, migrate.strategy.3=strategy_3, migrate.strategy.4=distance_4, migrate.distance=distance_quanti_RES0)
+
+HostTraits <- as.tibble(data.frame(Species = sort(unique(DatAVM$Avian.host.species))))
+HostTraits <- HostTraits %>% left_join(Elton.dat) %>% left_join(DatMigr)
 
 
-HostTraits <- data.frame(Species = sort(unique(Dat.AVM.All$Host)))
-NHost <- length(HostTraits$Species)
-
-sel.row <- match(HostTraits$Species, Elton.dat$Scientific)
-
-HostTraits$PassNonPass <- Elton.dat$PassNonPass [sel.row]
-HostTraits$IOCOrder <- Elton.dat$IOCOrder [sel.row]
-HostTraits$BLFamilyLatin <- Elton.dat$BLFamilyLatin [sel.row]
-HostTraits$BLFamilyEnglish <- Elton.dat$BLFamilyEnglish [sel.row]
-
-HostTraits$Bodymass <- Elton.dat$BodyMass.Value [sel.row]
-HostTraits$ForStrat.watbelowsurf <- Elton.dat$ForStrat.watbelowsurf [sel.row]
-HostTraits$ForStrat.wataroundsurf <- Elton.dat$ForStrat.wataroundsurf [sel.row] 
-HostTraits$ForStrat.ground <- Elton.dat$ForStrat.ground [sel.row]
-HostTraits$ForStrat.understory <- Elton.dat$ForStrat.understory [sel.row]
-HostTraits$ForStrat.midhigh <- Elton.dat$ForStrat.midhigh [sel.row]
-HostTraits$ForStrat.canopy <- Elton.dat$ForStrat.canopy [sel.row]
-HostTraits$ForStrat.aerial <- Elton.dat$ForStrat.aerial [sel.row]
-HostTraits$PelagicSpecialist <- Elton.dat$PelagicSpecialist [sel.row]
-
-HostTraits$Diet.5Cat  <- Elton.dat$Diet.5Cat [sel.row]
-HostTraits$Diet.Inv  <- Elton.dat$Diet.Inv [sel.row]
-HostTraits$Diet.Vend  <- Elton.dat$Diet.Vend [sel.row]
-HostTraits$Diet.Vect <- Elton.dat$Diet.Vect [sel.row]
-HostTraits$Diet.Vfish <- Elton.dat$Diet.Vfish [sel.row]
-HostTraits$Diet.Vunk <- Elton.dat$Diet.Vunk [sel.row]
-HostTraits$Diet.Scav <- Elton.dat$Diet.Scav [sel.row]
-HostTraits$Diet.Fruit <- Elton.dat$Diet.Fruit [sel.row]
-HostTraits$Diet.Nect <- Elton.dat$Diet.Nect [sel.row]
-HostTraits$Diet.Seed <- Elton.dat$Diet.Seed [sel.row]
-HostTraits$Diet.PlantO <- Elton.dat$Diet.PlantO [sel.row]
+write.csv(HostTraits, file = "AvMal_HostTrait.csv")
 
 
 
