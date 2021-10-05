@@ -91,7 +91,7 @@ DatMerge$Diet.Vunk_sc <-  as.numeric(scale(DatMerge$Diet.Vunk))
 DatMerge$Diet.Scav_sc <-  as.numeric(scale(DatMerge$Diet.Scav))
 DatMerge$Diet.Fruit_sc <-  as.numeric(scale(DatMerge$Diet.Fruit))
 DatMerge$Diet.Nect_sc <-  as.numeric(scale(DatMerge$Diet.Nect))
-DatMerge$bird.richness_sc <-  as.numeric(scale(DatMerge$Diet.Nect))
+DatMerge$bird.richness_sc <-  as.numeric(scale(DatMerge$bird.richness))
 DatMerge$migrate.distance_sc <-  as.numeric(scale(DatMerge$migrate.distance))
   
 host_spname <- sort(unique(DatMerge$Species))
